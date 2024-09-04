@@ -5,6 +5,46 @@ from scipy.fftpack import fft, fftfreq
 from scipy.signal import savgol_filter
 from scipy.stats import skew, kurtosis
 import pywt
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+import seaborn as sns
+
+# Assuming features_df is already created and contains the 'label' column
+def plot_feature_distributions(features_df, features):
+    """Plots individual feature distributions by class."""
+    for feature in features:
+        if feature == 'label':
+            continue  # Skip plotting the label column
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(x='label', y=feature, data=features_df)
+        plt.title(f'Distribution of {feature} by Class')
+        plt.ylabel('Value')
+        plt.xlabel('Class')
+        plt.savefig(f'feature_distribution_{feature}.png')  # Save each plot as a PNG file
+        plt.show()
+
+def plot_sampled_windows(wireless_env, edges, labels, num_windows):
+    """Plot a sample of the windows with their corresponding labels."""
+    plt.figure(figsize=(15, 5 * num_windows))
+    
+    sample_indices = np.random.choice(range(len(edges)), num_windows, replace=False)
+    for i, idx in enumerate(sample_indices):
+        edge = edges[idx]
+        start = int(edge - half_samples)
+        end = int(edge + half_samples)
+        
+        if start < 0 or end > len(wireless_env):  # Ensure index is within bounds
+            continue
+        
+        plt.subplot(num_windows, 1, i + 1)
+        plt.plot(wireless_env[start:end], label=f'Label: {labels[idx]}')
+        plt.title(f'Window {i+1} around edge {edge} with label {labels[idx]}')
+        plt.xlabel('Sample index')
+        plt.ylabel('Signal amplitude')
+        plt.legend()
+    
+    plt.tight_layout()
+    plt.show()
 
 def extract_features(segment):
     """ Extract relevant features for OOK ASK signal classification, including first derivative features. """
@@ -55,6 +95,27 @@ def extract_features(segment):
 
     return features
 
+def apply_and_save_pca(features_df, n_components=0.95, output_file='reduced_features.csv'):
+    # Assuming all columns except 'label' are features
+    features = features_df.loc[:, features_df.columns != 'label']
+    labels = features_df['label']
+    
+    # Standardize the features
+    scaler = StandardScaler()
+    features_scaled = scaler.fit_transform(features)
+    
+    # Initialize PCA
+    pca = PCA(n_components=n_components)
+    features_reduced = pca.fit_transform(features_scaled)
+    
+    # Convert the reduced features back to a DataFrame
+    features_reduced_df = pd.DataFrame(features_reduced, columns=[f'PC{i+1}' for i in range(features_reduced.shape[1])])
+    features_reduced_df['label'] = labels
+    
+    # Save the reduced features to a CSV file
+    features_reduced_df.to_csv(output_file, index=False)
+    
+    return features_reduced_df, pca
 
 # Load the data
 df = pd.read_csv('./testrf4-200msa.csv', header=None, names=['time', 'spi_data', 'wireless', 'spi_clock'])
@@ -81,7 +142,7 @@ plt.legend()
 plt.subplot(3, 1, 2)  # 3 rows, 1 column, second plot
 plt.plot(df_ten_percent['time'], df_ten_percent['spi_data'], label='SPI Data')
 plt.title('SPI Data Signal')
-plt.xlabel('Time (s)')
+plt.xlabel('Time (ms)')
 plt.ylabel('Amplitude')
 plt.legend()
 
@@ -89,7 +150,7 @@ plt.legend()
 plt.subplot(3, 1, 3)  # 3 rows, 1 column, third plot
 plt.plot(df_ten_percent['time'], df_ten_percent['wireless'], label='Wireless Signal')
 plt.title('Wireless Signal')
-plt.xlabel('Time (s)')
+plt.xlabel('Time (ms)')
 plt.ylabel('Amplitude')
 plt.legend()
 
@@ -136,11 +197,31 @@ true_labels = spi_data[falling_edges]
 # Calculate half of the samples_per_period
 half_samples = samples_per_period // 2
 
+fig, axs = plt.subplots(2, 1, figsize=(15, 12), sharex=True)
+axs[0].plot(df['time'][:ten_percent_length], wireless_env[:ten_percent_length], label='Wireless Envelope')
+axs[0].set_title('Wireless Envelope and Falling Edges')
+axs[0].set_ylabel('Amplitude')
+
+# Second subplot for digitized SPI data
+axs[1].plot(df['time'][:ten_percent_length], spi_data[:ten_percent_length], label='Digitized SPI Data', color='orange')
+axs[1].set_title('Digitized SPI Data and Falling Edges')
+axs[1].set_xlabel('Time (s)')
+axs[1].set_ylabel('Digital Signal')
+
+# Mark falling edges on the first subplot
+for edge in falling_edges:
+    if edge < ten_percent_length:  # Ensure edge is within the first 10%
+        axs[1].axvline(x=df['time'].iloc[edge], color='r', linestyle='--', linewidth=0.5)
+
+plt.tight_layout()
+plt.subplots_adjust(bottom=0.2, top=0.95)
+plt.show()
+
 # Extract features and labels for each window
 feature_label_sets = []
 for index, edge in enumerate(falling_edges):
-    start = int(edge - half_samples)
-    end = int(edge + half_samples)
+    start = int(edge - samples_per_period)
+    end = int(edge + samples_per_period)
     if start < 0 or end > len(wireless_env):  # Check to ensure indices are within bounds
         continue  # Skip this window to avoid indexing errors
     window = wireless_env[start:end]
@@ -152,7 +233,13 @@ for index, edge in enumerate(falling_edges):
 # Convert feature-label sets to DataFrame for easier analysis and visualization
 features_df = pd.DataFrame(feature_label_sets)
 
+plot_sampled_windows(wireless_env, falling_edges, true_labels, num_windows=5)
+
 # Save features to a CSV file
 features_df.to_csv("extracted_features_with_labels.csv", index=False)
 
-print("Features and labels extracted and saved. Total windows processed:", len(features_df))
+# Call the function to plot features
+features_to_plot = [col for col in features_df.columns if col != 'label']
+# plot_feature_distributions(features_df, features_to_plot)
+
+features_reduced_df, pca = apply_and_save_pca(features_df, output_file='reduced_features.csv')
