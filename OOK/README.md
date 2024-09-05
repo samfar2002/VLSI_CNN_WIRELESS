@@ -1,0 +1,3 @@
+This folder contain files for demodulation of collected wireless SPI data. 
+
+For model training, The SPI Data line, SPI Clock line, and wireless should be imported from the Oscilloscope. Demodulation.py should be ran first in the pipeline. Demodulation.py uses the Hilbert Transform to extract the envelope from the wireless data. Feature_Ext_For_Training.py should be ran next to extract features from the wireless envelope. This code also utlizes PCA for dimensionlity reduction so that the top features that explain 95% of variance for the features are exported. After PCA, the data is ready for model training. Model training is done using a Random Forest Classifier. 
